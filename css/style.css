@@ -3,6 +3,15 @@
    Theme: "Pine & Rose Clay"
    Deep pine nights, soft sage, ivory paper, rose-clay accents,
    mihrab-arch framing, Playfair italic + Poppins labels.
+
+   iOS FIXES in this version (search "iOS FIX"):
+   1. Removed mix-blend-mode from the fixed .grain overlay
+   2. Removed filter:blur + will-change from .reveal
+   3. Replaced box-shadow(100vmax) + clip-path full-bleed bands with ::before
+   4. Rounded map frame: forced own compositing layer, no hover-zoom on touch
+   5. Gate parallax layer (2nd copy of Background.webp) hidden on touch screens
+   6. Removed backdrop-filter from countdown boxes
+   7. Removed img{ !important } overrides
    ============================================================ */
 
 /* Google Fonts — must come before all other rules */
@@ -91,7 +100,7 @@ body{
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
-body.locked{ overflow:hidden; height:100vh; }
+body.locked{ overflow:hidden; height:100vh; height:100dvh; }
 img, svg{ display:block; max-width:100%; }
 
 @media (prefers-reduced-motion: reduce){
@@ -99,10 +108,12 @@ img, svg{ display:block; max-width:100%; }
   *{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
 }
 
-/* soft paper grain */
+/* soft paper grain
+   iOS FIX: mix-blend-mode on a full-screen fixed layer makes Safari drop
+   images underneath it. Plain low-opacity dots look almost identical. */
 .grain{
   position:fixed; inset:0; pointer-events:none; z-index:9999;
-  opacity:.035; mix-blend-mode:multiply;
+  opacity:.03;
   background-image: radial-gradient(rgba(0,0,0,.9) .6px, transparent .6px);
   background-size:3px 3px;
 }
@@ -151,7 +162,7 @@ img, svg{ display:block; max-width:100%; }
 /* Curtain reveal: the opening itself is driven by JS (a growing mask
    from the centre outward). This final state just removes the gate. */
 .gate.is-open{
-  pointer-events:none; visibility:hidden; overflow:hidden;
+  pointer-events:none; visibility:hidden; overflow:hidden; display:none;
 }
 
 /* soft glow behind the arch */
@@ -171,6 +182,13 @@ img, svg{ display:block; max-width:100%; }
   opacity:0; transition:opacity 1.8s var(--ease); will-change:transform;
 }
 .gate__parallax.is-ready{ opacity:1; }
+
+/* iOS FIX: the parallax layer is a SECOND full-screen copy of Background.webp
+   (the gate itself and the hero already use it). On touch devices it is not
+   needed and pushes Safari over its image-memory limit, so later images fail. */
+@media (hover:none), (max-width:900px){
+  .gate__parallax{ display:none; }
+}
 
 /* the arch */
 .gate__content{
@@ -344,11 +362,18 @@ img, svg{ display:block; max-width:100%; }
   max-width:var(--container); margin:0 auto; text-align:center;
 }
 
-/* full-bleed colour bands behind the centred sections */
+/* full-bleed colour bands behind the centred sections
+   iOS FIX: the old box-shadow:0 0 0 100vmax + clip-path:inset(0 -100vmax)
+   trick breaks image painting in Safari. A simple 100vw pseudo-element
+   behind the content does the same job safely. */
 .ayah, .couple, .story, .details, .venue, .footer{
+  isolation:isolate;
+}
+.ayah::before, .couple::before, .story::before, .details::before, .venue::before, .footer::before{
+  content:''; position:absolute; z-index:-1; pointer-events:none;
+  top:0; bottom:0; left:50%; width:100vw;
+  -webkit-transform:translateX(-50%); transform:translateX(-50%);
   background:var(--band, var(--ivory));
-  box-shadow:0 0 0 100vmax var(--band, var(--ivory));
-  clip-path:inset(0 -100vmax);
 }
 .couple, .venue{ --band: var(--ivory); }
 .story{ --band: var(--sage-pale); }
@@ -358,14 +383,14 @@ img, svg{ display:block; max-width:100%; }
 .ayah .section-title, .details .section-title, .footer .section-title{ color:var(--ivory); }
 .ayah .eyebrow, .details .eyebrow{ color:var(--rose-soft); }
 
-/* scroll reveal */
+/* scroll reveal
+   iOS FIX: filter:blur() + will-change on big wrappers that contain images
+   makes Safari skip painting those images. Opacity + transform is enough. */
 .reveal{
-  opacity:0; transform:translateY(26px); filter:blur(3px);
-  transition: opacity .8s var(--ease), transform .8s var(--ease), filter .8s var(--ease);
-  will-change:opacity, transform;
+  opacity:0; transform:translateY(26px);
+  transition: opacity .8s var(--ease), transform .8s var(--ease);
 }
-.reveal.is-visible{ opacity:1; transform:none; filter:none; }
-@media (prefers-reduced-motion: reduce){ .reveal{ filter:none; } }
+.reveal.is-visible{ opacity:1; transform:none; }
 
 /* ---------- HERO ---------- */
 .hero{
@@ -376,7 +401,6 @@ img, svg{ display:block; max-width:100%; }
   background-image:url("../images/Background.webp");
   background-size:cover; background-position:center; background-repeat:no-repeat;
   background-attachment: scroll; /* avoid iOS blank-screen bug with fixed */
-  -webkit-overflow-scrolling: touch;
 }
 .section.hero{ padding: clamp(7.4rem, 16svh, 11rem) 1.5rem 0; }
 
@@ -544,11 +568,11 @@ img, svg{ display:block; max-width:100%; }
   text-transform:uppercase; color:var(--rose-soft); margin:0 0 1rem;
 }
 .countdown__grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:.6rem; }
+/* iOS FIX: backdrop-filter removed (a flat translucent fill looks the same on pine) */
 .countdown__unit{
   display:flex; flex-direction:column; align-items:center; gap:.2rem;
   padding:.9rem .2rem .7rem; border-radius:16px;
-  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12);
-  -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px);
+  background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.12);
 }
 .countdown__num{
   font-family:var(--font-display); font-weight:400; font-size:clamp(1.6rem, 6vw, 2.3rem);
@@ -584,10 +608,22 @@ img, svg{ display:block; max-width:100%; }
   border-radius:200px 200px 22px 22px;
   border:1px solid var(--sage); padding:8px; background:var(--sage-pale);
   box-shadow:0 30px 60px -36px rgba(22,48,42,.5);
+  /* iOS FIX: rounded corners + overflow:hidden + image = Safari clip bug.
+     Give the frame its own layer and a proper mask. */
+  isolation:isolate;
+  -webkit-mask-image:-webkit-radial-gradient(white, black);
+  -webkit-transform:translateZ(0); transform:translateZ(0);
 }
 .venue__map-frame a{ display:block; border-radius:192px 192px 15px 15px; overflow:hidden; }
-.venue__map-img{ width:100%; height:auto; aspect-ratio:3/2; object-fit:cover; transition:transform .8s var(--ease); }
-.venue__map-frame:hover .venue__map-img{ transform:scale(1.03); }
+.venue__map-img{
+  display:block; width:100%; height:auto; aspect-ratio:3/2; object-fit:cover;
+  opacity:1; visibility:visible;
+}
+/* hover zoom only on devices that really hover (not iPhone) */
+@media (hover:hover) and (pointer:fine){
+  .venue__map-img{ transition:transform .8s var(--ease); }
+  .venue__map-frame:hover .venue__map-img{ transform:scale(1.03); }
+}
 .venue__map-glow{ display:none; }
 .venue__map-fallback{ font-size:.95rem; color:var(--ink-soft); margin:.9rem 0 0; }
 .venue__map-fallback a{ color:var(--sage-deep); text-underline-offset:3px; }
@@ -676,8 +712,8 @@ img, svg{ display:block; max-width:100%; }
   .hero__name-line{ font-size: clamp(2.4rem, 10vw, 3.5rem); }
   .section-title{ font-size: clamp(1.8rem, 7vw, 2.6rem); }
 
-  /* Ensure images always show on mobile */
-  img{ display:block !important; max-width:100% !important; height:auto !important; }
+  /* iOS FIX: the old img{ ... !important } block is gone — it fought with
+     aspect-ratio / object-fit and is no longer needed. */
   .venue__map-img{ min-height:160px; }
 
   /* Fix gate arch sizing on very small phones */
@@ -719,13 +755,13 @@ img, svg{ display:block; max-width:100%; }
   opacity:0;
   filter:blur(14px) scale(1.04);
   pointer-events:none;
+  visibility:hidden;
 }
 
 /* ---- envelope wrapper ---- */
 .env-wrap{
   position:relative;
   width: min(88vw, 340px);
-  /* height determined by children */
   filter: drop-shadow(0 24px 60px rgba(0,0,0,.55));
   transition: transform .55s cubic-bezier(.22,.61,.36,1);
 }
@@ -760,7 +796,6 @@ img, svg{ display:block; max-width:100%; }
   text-align:center;
   padding:1.2rem 1rem;
   box-shadow:0 4px 18px -6px rgba(22,48,42,.3);
-  /* starts hidden below flap, slides up when flap opens */
   transform:translateX(-50%) translateY(20px);
   opacity:0;
   transition: transform .7s .45s cubic-bezier(.22,.61,.36,1),
@@ -786,10 +821,8 @@ img, svg{ display:block; max-width:100%; }
   position:absolute;
   top:0; left:0; width:100%;
   transform-origin: top center;
-  /* flap lies flat initially */
   transform: rotateX(0deg);
   transition: transform .75s .05s cubic-bezier(.4,.05,.2,1);
-  /* perspective set on parent */
 }
 .env-wrap{
   perspective:900px;
@@ -834,7 +867,7 @@ img, svg{ display:block; max-width:100%; }
   0%,100%{ opacity:.75; } 50%{ opacity:.25; }
 }
 
-/* ---- gold corner ornaments on overlay ---- */
+/* ---- ornament border on overlay ---- */
 .env-overlay::after{
   content:'';
   position:absolute; inset:18px; pointer-events:none; z-index:0;

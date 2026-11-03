@@ -1,6 +1,13 @@
 /* ============================================================
    JIHANA JALAL & OMER SHUROOK VADAKKAN — NIKHAH INVITATION
    Vanilla JS — gate intro, countdown, scroll reveals
+
+   iOS FIXES in this version (search "iOS FIX"):
+   1. Every <img> is forced to load eagerly and is decoded when the gate opens
+   2. The gate (with its background copy, canvas, parallax) is REMOVED from the
+      DOM after it opens, freeing image/GPU memory on iPhone
+   3. Parallax layer is skipped on touch devices
+   (The old commented-out guest / RSVP blocks were removed — they were unused.)
    ============================================================ */
 (function () {
   "use strict";
@@ -11,6 +18,30 @@
   var scrollCue = document.getElementById("scrollCue");
 
   var prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- iOS FIX: make sure every image really loads ---------- */
+  function forceImagesToLoad() {
+    var imgs = document.querySelectorAll("img");
+    Array.prototype.forEach.call(imgs, function (img) {
+      // lazy-loading inside hidden / transformed wrappers can fail on Safari
+      img.loading = "eager";
+      img.removeAttribute("loading");
+      img.setAttribute("decoding", "async");
+
+      // if the browser gave up on it, re-request it once
+      if (img.complete && img.naturalWidth === 0 && img.src) {
+        var src = img.src;
+        img.src = "";
+        img.src = src;
+      }
+      if (img.decode) {
+        img.decode().catch(function () { /* ignore */ });
+      }
+    });
+  }
+
+  // run as soon as the page has loaded, and again when the gate opens
+  window.addEventListener("load", forceImagesToLoad);
 
   /* ---------- Open the gate → curtain reveal (center → left & right) ---------- */
   var gateOpening = false;
@@ -30,6 +61,9 @@
       invitation.setAttribute("aria-hidden", "false");
       document.body.classList.remove("locked");
 
+      // iOS FIX: now that the invitation is visible, load/decode its images
+      forceImagesToLoad();
+
       // move focus into the invitation for accessibility
       var hero = document.getElementById("hero");
       if (hero) hero.setAttribute("tabindex", "-1");
@@ -41,6 +75,13 @@
       gate.style.pointerEvents = "none";
       gate.style.visibility = "hidden";
       gate.setAttribute("aria-hidden", "true");
+
+      // iOS FIX: remove the gate completely so Safari frees its background
+      // image, canvas and blur layers (they are never needed again)
+      window.setTimeout(function () {
+        if (gate && gate.parentNode) gate.parentNode.removeChild(gate);
+        forceImagesToLoad();
+      }, 1100);
     }
 
     if (DURATION === 0) {
@@ -116,16 +157,25 @@
           }
         });
       },
-      { threshold: 0.18, rootMargin: "0px 0px -40px 0px" }
+      { threshold: 0.1, rootMargin: "0px 0px -20px 0px" }
     );
     revealEls.forEach(function (el) { io.observe(el); });
+
+    // Safety net: never leave content invisible if the observer misfires
+    window.setTimeout(function () {
+      revealEls.forEach(function (el) {
+        var r = el.getBoundingClientRect();
+        if (r.top < window.innerHeight && r.bottom > 0) el.classList.add("is-visible");
+      });
+    }, 3000);
   } else {
     revealEls.forEach(function (el) { el.classList.add("is-visible"); });
   }
 
   /* ---------- Countdown timer ---------- */
   // Nikhah date: 7 November 2026, 11:00 AM
-  var WEDDING_DATE = new Date("2026-11-07T11:00:00");
+  // (written as numbers — iOS Safari can mis-parse some date strings)
+  var WEDDING_DATE = new Date(2026, 10, 7, 11, 0, 0);
 
   var elDays = document.getElementById("cd-days");
   var elHours = document.getElementById("cd-hours");
@@ -216,6 +266,7 @@
       { passive: true }
     );
   }
+
   /* ---------- Background music ---------- */
   var audio = document.getElementById("bg-music");
   var muteBtn = document.getElementById("mute-btn");
@@ -232,12 +283,15 @@
   function startMusic() {
     if (musicStarted || !audio) return;
     audio.volume = 0.45;
-    audio.play().then(function () {
-      musicStarted = true;
-      setMuteIcon(true);
-    }).catch(function () {
-      // Browser blocked autoplay — muted icon stays, user can tap the button
-    });
+    var p = audio.play();
+    if (p && p.then) {
+      p.then(function () {
+        musicStarted = true;
+        setMuteIcon(true);
+      }).catch(function () {
+        // Browser blocked autoplay — muted icon stays, user can tap the button
+      });
+    }
   }
 
   // Try immediate autoplay on load (works on some browsers / after reload)
@@ -268,112 +322,11 @@
     });
   }
 
-  /* ---------- Guest personalisation (?guest=Name in URL) ---------- */
-  /*
-  (function () {
-    var params = new URLSearchParams(window.location.search);
-    var raw    = params.get("guest") || "";
-
-    // Sanitise: strip all HTML tags, trim whitespace, cap at 60 chars
-    var name = raw.replace(/<[^>]*>/g, "").trim().slice(0, 60);
-    if (!name) return;
-
-    var el = document.getElementById("heroGuest");
-    if (!el) return;
-
-    // Capitalise first letter of each word nicely
-    name = name.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
-
-    el.innerHTML =
-      "Dear <span class=\"hero__guest-name\">" + name + "</span>," +
-      "<br>you are cordially invited.";
-    el.classList.add("is-visible");
-  }());
-  */
-
-  /* ---------- RSVP — attendance toggle, counter, WhatsApp redirect ----------
-     Disabled — this invitation has no RSVP section.
-  (function () {
-    var form      = document.getElementById("rsvpForm");
-    if (!form) return;
-
-    var btnYes    = document.getElementById("btnYes");
-    var btnNo     = document.getElementById("btnNo");
-    var minusBtn  = document.getElementById("rsvpMinus");
-    var plusBtn   = document.getElementById("rsvpPlus");
-    var countEl   = document.getElementById("rsvpCount");
-    var nameEl    = document.getElementById("rsvpName");
-    var msgEl     = document.getElementById("rsvpMessage");
-    var WA_NUMBER = "916235440983"; // no + sign for wa.me links
-
-    function setAttendance(attending) {
-      btnYes.classList.toggle("is-selected",  attending);
-      btnNo.classList.toggle("is-selected",  !attending);
-      btnYes.querySelector("input").checked =  attending;
-      btnNo.querySelector("input").checked  = !attending;
-    }
-    setAttendance(true); // default: yes
-
-    btnYes.addEventListener("click", function () { setAttendance(true);  });
-    btnNo.addEventListener("click",  function () { setAttendance(false); });
-
-    minusBtn.addEventListener("click", function () {
-      var v = parseInt(countEl.value, 10);
-      if (v > 1) countEl.value = v - 1;
-    });
-    plusBtn.addEventListener("click", function () {
-      var v = parseInt(countEl.value, 10);
-      if (v < 10) countEl.value = v + 1;
-    });
-
-    form.addEventListener("submit", function (e) {
-      e.preventDefault();
-
-      var name = nameEl.value.trim();
-      if (!name) {
-        nameEl.classList.add("is-error");
-        nameEl.focus();
-        return;
-      }
-      nameEl.classList.remove("is-error");
-
-      var attending = btnYes.classList.contains("is-selected");
-      var count     = parseInt(countEl.value, 10) || 1;
-      var message   = msgEl ? msgEl.value.trim() : "";
-
-      var lines = [];
-      lines.push("Assalamu Alaikum \uD83C\uDF39");
-      lines.push("");
-      lines.push("*Jihana Jalal and Omer Shurook Vadakkan — Nikhah RSVP*");
-      lines.push("");
-      lines.push("*Name:* " + name);
-      lines.push("*Attendance:* " + (attending ? "\u2705 Joyfully Accepts" : "\u274C Regretfully Declines"));
-      if (attending) {
-        lines.push("*Number of Guests:* " + count);
-      }
-      if (message) {
-        lines.push("*Message:* " + message);
-      }
-      lines.push("");
-      lines.push("_Sent from the nikhah invitation_");
-
-      var text = encodeURIComponent(lines.join("\n"));
-      window.open("https://wa.me/" + WA_NUMBER + "?text=" + text, "_blank");
-    });
-
-    nameEl.addEventListener("input", function () {
-      nameEl.classList.remove("is-error");
-    });
-  }());
-  ---------------------------------------------------------------- */
-
 })();
 
 /* ==========================================================================
    Floating Ornaments — full-viewport drifting crescents & stars
-   (replaces the earlier floating flowers; same container + same
-   .flower-petal class, so the existing CSS fall animation still applies)
-   Vanilla JS · no dependencies
+   (same container + same .flower-petal class, so the CSS fall animation applies)
    ========================================================================== */
 
 function initFloatingFlowers() {
@@ -390,12 +343,12 @@ function initFloatingFlowers() {
     "#F2DFD4", // blush
     "#A3B5A2", // sage
     "#C48670", // rose clay
-    "#E8D5A8", // pale gold
+    "#E8D5A8"  // pale gold
   ];
 
   // Fewer ornaments on smaller screens for performance
   var w = window.innerWidth;
-  var PETAL_COUNT = w < 640 ? 6 : w < 1024 ? 9 : 14;
+  var PETAL_COUNT = w < 640 ? 5 : w < 1024 ? 9 : 14;
 
   function rand(min, max) {
     return min + Math.random() * (max - min);
@@ -432,8 +385,8 @@ function initFloatingFlowers() {
     var petal = document.createElement("div");
     petal.className = "flower-petal";
 
-    var size = rand(14, 28);          // px
-    var duration = rand(16, 28);          // seconds per full loop
+    var size = rand(14, 28);           // px
+    var duration = rand(16, 28);       // seconds per full loop
     var delay = -rand(0, duration);    // negative = already mid-animation on page load
     var color = colors[Math.floor(Math.random() * colors.length)];
     var opacity = rand(0.45, 0.80);
@@ -455,9 +408,9 @@ document.addEventListener("DOMContentLoaded", initFloatingFlowers);
 
 /* ==========================================================================
    Gate — Interactive enhancements
-   · Letter-by-letter name stagger
-   · Mouse / touch parallax on the background layer
-   · Gold particle canvas (twinkling stars)
+   · Name reveal
+   · Mouse parallax on the background layer (desktop only)
+   · Particle canvas (twinkling dots)
    · Button click ripple
    ========================================================================== */
 
@@ -465,10 +418,11 @@ document.addEventListener("DOMContentLoaded", initFloatingFlowers);
   "use strict";
 
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // iOS FIX: touch devices skip the extra full-screen parallax image layer
+  var isTouch = window.matchMedia("(hover: none)").matches || window.innerWidth <= 900;
 
   /* ------------------------------------------------------------------
       1. BLUR-FADE REVEAL — set name text directly then let CSS animate
-        opacity + blur from blurred-out to sharp for each name word.
   ------------------------------------------------------------------ */
   var name1El = document.getElementById("gateName1");
   var name2El = document.getElementById("gateName2");
@@ -485,13 +439,12 @@ document.addEventListener("DOMContentLoaded", initFloatingFlowers);
   }
 
   /* ------------------------------------------------------------------
-     2. MOUSE / TOUCH PARALLAX — the .gate__parallax layer shifts
-        subtly opposite to cursor position, giving a 3-D depth feel.
+     2. MOUSE PARALLAX — desktop only
   ------------------------------------------------------------------ */
   var parallaxLayer = document.getElementById("gateParallax");
   var gate = document.getElementById("gate");
 
-  if (parallaxLayer && gate && !reduced) {
+  if (parallaxLayer && gate && !reduced && !isTouch) {
     // Reveal the parallax layer once page is loaded
     window.setTimeout(function () {
       parallaxLayer.classList.add("is-ready");
@@ -520,16 +473,7 @@ document.addEventListener("DOMContentLoaded", initFloatingFlowers);
       tY = ((e.clientY - cy) / cy) * -MAX;
     }
 
-    function onTouchMove(e) {
-      if (!e.touches.length) return;
-      var cx = window.innerWidth / 2;
-      var cy = window.innerHeight / 2;
-      tX = ((e.touches[0].clientX - cx) / cx) * -(MAX * 0.5);
-      tY = ((e.touches[0].clientY - cy) / cy) * -(MAX * 0.5);
-    }
-
     gate.addEventListener("mousemove", onMouseMove, { passive: true });
-    gate.addEventListener("touchmove", onTouchMove, { passive: true });
 
     // stop the RAF once gate is opened to save resources
     var gateBtn = document.getElementById("gateButton");
@@ -537,14 +481,12 @@ document.addEventListener("DOMContentLoaded", initFloatingFlowers);
       gateBtn.addEventListener("click", function () {
         cancelAnimationFrame(rafId);
         gate.removeEventListener("mousemove", onMouseMove);
-        gate.removeEventListener("touchmove", onTouchMove);
       }, { once: true });
     }
   }
 
   /* ------------------------------------------------------------------
-     3. GOLD PARTICLE CANVAS — tiny glowing gold dots that twinkle
-        independently, layered behind the content.
+     3. PARTICLE CANVAS — tiny glowing dots that twinkle independently
   ------------------------------------------------------------------ */
   var canvas = document.getElementById("gateCanvas");
   if (canvas && !reduced) {
@@ -575,10 +517,10 @@ document.addEventListener("DOMContentLoaded", initFloatingFlowers);
     }
 
     // populate: fewer on mobile
-    var COUNT = window.innerWidth < 640 ? 55 : window.innerWidth < 1024 ? 90 : 140;
+    var COUNT = window.innerWidth < 640 ? 40 : window.innerWidth < 1024 ? 90 : 140;
     for (var i = 0; i < COUNT; i++) {
       var p = makeParticle();
-      p.phase = Math.random() * Math.PI * 2;       // scatter phases so they don't all pulse together
+      p.phase = Math.random() * Math.PI * 2;
       particles.push(p);
     }
 
@@ -606,21 +548,22 @@ document.addEventListener("DOMContentLoaded", initFloatingFlowers);
     }
     animFrameId = requestAnimationFrame(drawParticles);
 
-    // stop canvas when gate closes
+    // stop canvas when gate closes, and release its memory (iOS FIX)
     var gateBtnForCanvas = document.getElementById("gateButton");
     if (gateBtnForCanvas) {
       gateBtnForCanvas.addEventListener("click", function () {
         window.setTimeout(function () {
           cancelAnimationFrame(animFrameId);
           ctx.clearRect(0, 0, canvas.width, canvas.height);
+          canvas.width = 0;
+          canvas.height = 0;
         }, 1600);
       }, { once: true });
     }
   }
 
   /* ------------------------------------------------------------------
-     4. BUTTON RIPPLE — on click, inject a .gate__ripple element that
-        expands outward from the exact click/touch point.
+     4. BUTTON RIPPLE
   ------------------------------------------------------------------ */
   var gateButtonEl = document.getElementById("gateButton");
   if (gateButtonEl && !reduced) {
